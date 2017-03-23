@@ -108,7 +108,11 @@ class ButtonWindow(Gtk.Window):
         passwd_hbx.pack_start(Gtk.Label(PASSWD_PROMPT), True, True, 0)
         self.passwd_entry = Gtk.Entry()
         self.passwd_entry.set_max_length(MAX_INPUT_LEN)
+        self.passwd_entry.set_visibility(False)
         passwd_hbx.pack_start(self.passwd_entry, True, True, 0)
+        self.passwd_visible = Gtk.CheckButton("View")
+        self.passwd_visible.connect("toggled", self.on_visible_toggled)
+        passwd_hbx.pack_start(self.passwd_visible, True, True, 0)
         vbox.add(passwd_hbx)
 
         # domains list as ComboBoxText w/o user input
@@ -161,6 +165,10 @@ class ButtonWindow(Gtk.Window):
             self.authInfo.domain = name
         else:
             pass
+
+    def on_visible_toggled(self, button):
+        self.passwd_entry.set_visibility(button.get_active())
+        return
 
 
 class ConfigInfo:
