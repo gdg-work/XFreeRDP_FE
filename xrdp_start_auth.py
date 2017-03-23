@@ -3,8 +3,9 @@ import gi
 import logging
 import logging.handlers
 import re
+import os
+import subprocess as sp
 from subprocess import PIPE, Popen
-from os import environ
 from sys import argv
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
@@ -49,6 +50,9 @@ def startRDP(o_cfg):
 
 class LoginInfo:
     dInfo = {}
+
+    def __init__(self):
+        self.dInfo['login'], self.dInfo['domain'] = user_domain_from_environment()
 
     @property
     def login(self):
@@ -101,6 +105,7 @@ class ButtonWindow(Gtk.Window):
         login_hbx.pack_start(Gtk.Label(LOGIN_PROMPT), True, True, 0)
         self.login_entry = Gtk.Entry()
         self.login_entry.set_max_length(MAX_INPUT_LEN)
+        self.login_entry.set_text(self.authInfo.login)
         login_hbx.pack_start(self.login_entry, True, True, 0)
 
         # password field
@@ -121,8 +126,11 @@ class ButtonWindow(Gtk.Window):
         domain_combo = Gtk.ComboBoxText()
         domain_combo.set_entry_text_column(0)
         domain_combo.connect("changed", self.on_domain_combo_changed)
+        if self.authInfo.domain:
+            domain_combo.append_text(self.authInfo.domain)
         for dom in o_config.ls_domains:
             domain_combo.append_text(dom)
+        domain_combo.set_active(0)
         domains_hbx.pack_start(domain_combo, True, True, 0)
 
         vbox.add(domains_hbx)
@@ -181,11 +189,11 @@ class ConfigInfo:
         self.s_hostName = "127.0.0.1"
         self.b_exposeHomeDir = False    # True
         self.b_exposeMedia = False      # True
-        self.c_mediaMountPath = '/run/media/' + environ['LOGNAME']
-        if 'DOMAINS' in environ:
-            self.ls_domains = environ['DOMAINS'].split(':')
-        if 'LOGFILE' in environ:
-            self.s_logFile = environ['LOGFILE']
+        self.c_mediaMountPath = '/run/media/' + os.environ['LOGNAME']
+        if 'DOMAINS' in os.environ:
+            self.ls_domains = os.environ['DOMAINS'].split(':')
+        if 'LOGFILE' in os.environ:
+            self.s_logFile = os.environ['LOGFILE']
             self.setupLog(o_logObject)
         else:
             self.s_logFile = ''
@@ -212,7 +220,7 @@ class ConfigInfo:
                     r'%(asctime)s: %(name)s - %(levelname)s - %(message)s'
                     )
             o_logFile = logging.handlers.RotatingFileHandler(
-                    filename=environ['LOGFILE'], maxBytes=1024*1024, 
+                    filename=os.environ['LOGFILE'], maxBytes=1024*1024, 
                     backupCount=3)
             o_logFile.setFormatter(o_logFormat)
             o_log.addHandler(o_logFile)
@@ -253,6 +261,41 @@ class ConfigInfo:
     @property
     def app(self):
         return self.s_appName
+
+
+def user_domain_from_environment():
+    """ returns a tuple 'user, domain'. Sources of information:
+     - environment ($LOGNAME)
+     - kerberos ?
+    """
+    IDPROGRAM = '/usr/bin/id'
+    KLIST = '/usr/bin/klist'
+    login, domain = ('', '')
+    # first, try the LOGNAME environment variable
+    if '@' in os.environ['LOGNAME']:
+        login, domain = os.environ['LOGNAME'].split('@')
+    else:
+        login = os.environ['LOGNAME']
+    oLog.debug('From an environment: user {0} and domain {1}')
+    if domain == '':
+        # not a format user@domain in LOGNAME
+        # trying to receive ID info from uname(1)
+        loginfo = sp.check_output([IDPROGRAM, '-un'], shell=False,
+                                  universal_newlines=True).strip()
+        if '@' in loginfo:
+            login, domain = loginfo.split('@')
+        else:
+            login = loginfo
+    if domain == '':
+        # still can't find domain, let's ask Kerberos
+        try:
+            loginfo = sp.check_output([KLIST, '-lc'],
+                                      shell=False,
+                                      universal_newlines=True).split('\n')[2].split()[0]
+            login, domain = loginfo.split('@')
+        except IndexError:
+            pass
+    return (login, domain)
 
 
 if __name__ == "__main__":
