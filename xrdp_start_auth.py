@@ -16,11 +16,11 @@ PASSWD_PROMPT = "Password"
 DOMAIN_PROMPT = "Domain"
 ENCODING = 'utf-8'
 MAX_INPUT_LEN = 64
+XFREERDP_BIN = '/usr/bin/xfreerdp.bin'
 RDP_HOST = "10.1.97.200"
-DOMAINS = ('pso.local', 'demo.loc', 'OSIC')
+DOMAINS = ('pso.local', 'demo.loc')
 APPNAME = 'iexplore'
 XFREERDP_OPTIONS = ('/cert-ignore', '+clipboard', '+home-drive', '-themes', '-wallpaper')
-
 
 oLog = logging.getLogger("xrdp_start")
 
@@ -31,7 +31,7 @@ def startRDP(o_cfg):
     # password on stdin
     # https://github.com/FreeRDP/FreeRDP/issues/1358,
     # bmiklautz commented on Dec 4, 2014
-    arguments = ['/usr/bin/xfreerdp']
+    arguments = [ XFREERDP_BIN ]
     arguments += list(XFREERDP_OPTIONS)
     arguments.append('/u:{}'.format(o_cfg.auth.login))
     arguments.append('/d:{}'.format(o_cfg.auth.domain))
@@ -96,55 +96,68 @@ class ButtonWindow(Gtk.Window):
         Gtk.Window.__init__(self, title="Please authenticate")
         self.set_border_width(10)
 
+        # internal functions
+        def o_mk_login_field():
+            login_hbox = Gtk.Box(spacing=6)
+            login_hbox.pack_start(Gtk.Label(LOGIN_PROMPT), True, True, 0)
+            self.login_entry = Gtk.Entry()
+            self.login_entry.set_max_length(MAX_INPUT_LEN)
+            self.login_entry.set_text(self.authInfo.login)
+            login_hbox.pack_start(self.login_entry, True, True, 0)
+            return login_hbox
+
+        def o_mk_passwd_field():
+            """ makes a Box containing password input field and "visible" checkbox """
+            passwd_hbox = Gtk.Box(spacing=6)
+            passwd_hbox.pack_start(Gtk.Label(PASSWD_PROMPT), True, True, 0)
+            self.passwd_entry = Gtk.Entry()
+            self.passwd_entry.set_max_length(MAX_INPUT_LEN)
+            self.passwd_entry.set_visibility(False)
+            self.passwd_entry.set_activates_default(True)
+            self.passwd_entry.set_invisible_char('*')
+            passwd_hbox.pack_start(self.passwd_entry, True, True, 0)
+            self.passwd_visible = Gtk.CheckButton("View")
+            self.passwd_visible.connect("toggled", self.on_visible_toggled)
+            passwd_hbox.pack_start(self.passwd_visible, True, True, 0)
+            return passwd_hbox
+
+        def o_mk_domain_combo():
+            """ makes a Box containing a domains selector """
+            domains_hbox = Gtk.Box(spacing=6)
+            domains_hbox.pack_start(Gtk.Label(DOMAIN_PROMPT), True, True, 0)
+            domain_combo = Gtk.ComboBoxText()
+            domain_combo.set_entry_text_column(0)
+            domain_combo.connect("changed", self.on_domain_combo_changed)
+            if self.authInfo.domain:
+                domain_combo.append_text(self.authInfo.domain)
+            for dom in o_config.ls_domains:
+                domain_combo.append_text(dom)
+            domain_combo.set_active(0)
+            domains_hbox.pack_start(domain_combo, True, True, 0)
+            return domains_hbox
+
         # Input fields
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add(vbox)
         # login field
-        login_hbx = Gtk.Box(spacing=6)
-        vbox.add(login_hbx)
-        login_hbx.pack_start(Gtk.Label(LOGIN_PROMPT), True, True, 0)
-        self.login_entry = Gtk.Entry()
-        self.login_entry.set_max_length(MAX_INPUT_LEN)
-        self.login_entry.set_text(self.authInfo.login)
-        login_hbx.pack_start(self.login_entry, True, True, 0)
-
+        vbox.add(o_mk_login_field())
         # password field
-        passwd_hbx = Gtk.Box(spacing=6)
-        passwd_hbx.pack_start(Gtk.Label(PASSWD_PROMPT), True, True, 0)
-        self.passwd_entry = Gtk.Entry()
-        self.passwd_entry.set_max_length(MAX_INPUT_LEN)
-        self.passwd_entry.set_visibility(False)
-        passwd_hbx.pack_start(self.passwd_entry, True, True, 0)
-        self.passwd_visible = Gtk.CheckButton("View")
-        self.passwd_visible.connect("toggled", self.on_visible_toggled)
-        passwd_hbx.pack_start(self.passwd_visible, True, True, 0)
-        vbox.add(passwd_hbx)
-
+        vbox.add(o_mk_passwd_field())
         # domains list as ComboBoxText w/o user input
-        domains_hbx = Gtk.Box(spacing=6)
-        domains_hbx.pack_start(Gtk.Label(DOMAIN_PROMPT), True, True, 0)
-        domain_combo = Gtk.ComboBoxText()
-        domain_combo.set_entry_text_column(0)
-        domain_combo.connect("changed", self.on_domain_combo_changed)
-        if self.authInfo.domain:
-            domain_combo.append_text(self.authInfo.domain)
-        for dom in o_config.ls_domains:
-            domain_combo.append_text(dom)
-        domain_combo.set_active(0)
-        domains_hbx.pack_start(domain_combo, True, True, 0)
-
-        vbox.add(domains_hbx)
+        vbox.add(o_mk_domain_combo())
 
         # login/cancel buttons
         hbox = Gtk.Box(spacing=6)
-        vbox.add(hbox)
         button = Gtk.Button.new_with_label("Login")
+        button.set_can_default(True)
+        self.set_default(button)
         button.connect("clicked", self.on_login_clicked)
         hbox.pack_start(button, True, True, 0)
 
         button = Gtk.Button.new_with_mnemonic("_Cancel")
         button.connect("clicked", self.on_close_clicked)
         hbox.pack_start(button, True, True, 0)
+        vbox.add(hbox)
         return
 
     def on_login_clicked(self, button):
@@ -154,8 +167,13 @@ class ButtonWindow(Gtk.Window):
         # flush GTK events queue
         while Gtk.events_pending():
             Gtk.main_iteration()
-        Gtk.main_quit()
-        self.destroy()
+        if self.authInfo.login and self.authInfo.password and self.authInfo.domain:
+            Gtk.main_quit()
+            self.destroy()
+        else:
+            # we need a dialogue window that tells about all fields required
+            oLog.info('on_login_clicked: not all fields are full')
+            pass
 
     def on_domain_combo_changed(self, combo):
         oLog.debug("Domain changed to {}".format(combo.get_active_text()))
@@ -278,6 +296,7 @@ def user_domain_from_environment():
         login = os.environ['LOGNAME']
     oLog.debug('From an environment: user {0} and domain {1}')
     if domain == '':
+        oLog.debug('No "@" in login name, trying id command')
         # not a format user@domain in LOGNAME
         # trying to receive ID info from uname(1)
         loginfo = sp.check_output([IDPROGRAM, '-un'], shell=False,
@@ -288,13 +307,17 @@ def user_domain_from_environment():
             login = loginfo
     if domain == '':
         # still can't find domain, let's ask Kerberos
+        oLog.debug('Trying to ask Kerberos for domain')
         try:
             loginfo = sp.check_output([KLIST, '-lc'],
                                       shell=False,
                                       universal_newlines=True).split('\n')[2].split()[0]
             login, domain = loginfo.split('@')
+        except sp.CalledProcessError:
+            # not in Kerberos yet, klist returns 1
+            oLog.debug('{} returns 1, not logged to Kerberos yet?'.format(KLIST))
         except IndexError:
-            pass
+            oLog.debug('No "@" in Kerberos principal name')
     return (login, domain)
 
 
